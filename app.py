@@ -89,4 +89,82 @@ def db_init():
         "status": "ok",
         "message": "Tabela matches criada/verificada"
     }
+    @app.get("/collect-next")
+async def collect_next():
+    url = "https://v3.football.api-sports.io/fixtures?next=1"
+    headers = {"x-apisports-key": API_KEY}
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers)
+
+    data = response.json()
+
+    if response.status_code != 200:
+        return {
+            "status": "error",
+            "api_response": data
+        }
+
+    fixture = data["response"][0]
+
+    f = fixture["fixture"]
+    league = fixture["league"]
+    teams = fixture["teams"]
+    goals = fixture["goals"]
+
+    sql = """
+    INSERT INTO matches (
+        api_fixture_id,
+        league_id,
+        league_name,
+        season,
+        home_team_id,
+        home_team_name,
+        away_team_id,
+        away_team_name,
+        match_date,
+        status,
+        home_goals,
+        away_goals
+    )
+    VALUES (
+        %s, %s, %s, %s, %s, %s, %s, %s,
+        %s, %s, %s, %s
+    )
+    ON CONFLICT (api_fixture_id)
+    DO UPDATE SET
+        status = EXCLUDED.status,
+        home_goals = EXCLUDED.home_goals,
+        away_goals = EXCLUDED.away_goals,
+        updated_at = NOW();
+    """
+
+    values = (
+        f["id"],
+        league["id"],
+        league["name"],
+        league["season"],
+        teams["home"]["id"],
+        teams["home"]["name"],
+        teams["away"]["id"],
+        teams["away"]["name"],
+        f["date"],
+        f["status"]["short"],
+        goals["home"],
+        goals["away"]
+    )
+
+    with connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, values)
+
+    return {
+        "status": "ok",
+        "message": "Jogo real coletado e salvo no PostgreSQL",
+        "fixture_id": f["id"],
+        "league": league["name"],
+        "home": teams["home"]["name"],
+        "away": teams["away"]["name"],
+        "date": f["date"]
+    }
 
